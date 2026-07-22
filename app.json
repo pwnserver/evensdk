@@ -1,0 +1,14 @@
+{
+  "package_id": "com.pwnserver.eventranslate",
+  "edition": "202601",
+  "name": "Even Translate",
+  "version": "0.1.0",
+  "min_app_version": "2.0.0",
+  "min_sdk_version": "0.0.10",
+  "entrypoint": "index.html",
+  "permissions": [
+    { "name": "g2-microphone", "desc": "Listen to nearby speech to translate it live onto the glasses." },
+    { "name": "network", "desc": "Send audio to the local translation backend.", "whitelist": ["ws://100.64.0.17:8787", "http://100.64.0.17:8787", "ws://192.168.78.164:8787", "http://192.168.78.164:8787"] }
+  ],
+  "supported_languages": ["en"]
+}

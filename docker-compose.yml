@@ -1,0 +1,23 @@
+# Even Translate on the GB10 server.
+#
+# Uses host networking so it can reach an existing whisper.cpp GPU container
+# on 127.0.0.1 and bind :8787 directly. Point WHISPER_URL at your whisper.
+#
+#   1) create .env  →  ANTHROPIC_API_KEY=sk-ant-...   (see .env.example)
+#   2) docker compose up -d --build
+#   3) glasses/QR → http://<server-tailscale-ip>:8787/
+services:
+  translator:
+    build: .
+    image: even-translate:latest
+    container_name: even-translate
+    network_mode: host
+    env_file:
+      - .env
+    environment:
+      - PORT=8787
+      # Reuse your existing GPU whisper.cpp server. asr-whispercpp-1 is on
+      # 127.0.0.1:8081; lrttc-whisper on 127.0.0.1:8082. Override in .env.
+      - WHISPER_URL=${WHISPER_URL:-http://127.0.0.1:8081}
+      - TRANSLATE_MODEL=${TRANSLATE_MODEL:-claude-opus-4-8}
+    restart: unless-stopped
