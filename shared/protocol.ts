@@ -43,23 +43,32 @@ export function langEnName(code: string): string {
   return LANGUAGES.find(l => l.code === code)?.en ?? code
 }
 
+/** Latency/quality presets — trade end-of-phrase wait + model for speed. */
+export type LatencyMode = 'fast' | 'balanced' | 'accurate'
+
 export type ClientConfig = {
   /** whisper source language, or 'auto' to detect. */
   sourceLang: string
   /** target language code to translate into. */
   targetLang: string
+  /** latency/quality tradeoff. */
+  latency: LatencyMode
 }
 
-export const DEFAULT_CONFIG: ClientConfig = { sourceLang: 'auto', targetLang: 'ru' }
+export const DEFAULT_CONFIG: ClientConfig = { sourceLang: 'auto', targetLang: 'ru', latency: 'balanced' }
 
-export type ClientMessage = { type: 'config' } & ClientConfig
+export type ClientMessage =
+  | ({ type: 'config' } & ClientConfig)
+  /** RTT probe: server echoes it back as pong with the same `t`. */
+  | { type: 'ping'; t: number }
 
 export type ServerMessage =
   | { type: 'status'; state: 'ready' | 'listening' | 'error'; message?: string }
   /** Interim source-language transcript for the utterance in progress. */
   | { type: 'partial'; source: string }
-  /** A finalized, translated line. `id` increases monotonically per connection. */
-  | { type: 'segment'; id: number; source: string; sourceLang: string; target: string }
+  /** A finalized, translated line. `latencyMs` = server STT+translate time. */
+  | { type: 'segment'; id: number; source: string; sourceLang: string; target: string; latencyMs: number }
+  | { type: 'pong'; t: number }
   | { type: 'error'; message: string }
 
 export function parseServerMessage(data: string): ServerMessage | null {
@@ -74,7 +83,7 @@ export function parseServerMessage(data: string): ServerMessage | null {
 export function parseClientMessage(data: string): ClientMessage | null {
   try {
     const msg = JSON.parse(data) as ClientMessage
-    return msg && msg.type === 'config' ? msg : null
+    return msg && (msg.type === 'config' || msg.type === 'ping') ? msg : null
   } catch {
     return null
   }

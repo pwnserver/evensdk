@@ -8,7 +8,7 @@
   "entrypoint": "index.html",
   "permissions": [
     { "name": "g2-microphone", "desc": "Listen to nearby speech to translate it live onto the glasses." },
-    { "name": "network", "desc": "Send audio to the local translation backend.", "whitelist": ["ws://100.64.0.17:8787", "http://100.64.0.17:8787", "ws://192.168.78.164:8787", "http://192.168.78.164:8787"] }
+    { "name": "network", "desc": "Send audio to the translation backend over Tailscale.", "whitelist": ["ws://100.64.0.5:8787", "http://100.64.0.5:8787"] }
   ],
   "supported_languages": ["en"]
 }

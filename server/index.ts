@@ -4,11 +4,23 @@ import { fileURLToPath } from 'node:url'
 import { extname, normalize } from 'node:path'
 import process from 'node:process'
 import { WebSocketServer, WebSocket } from 'ws'
-import type { ServerMessage } from '../shared/protocol'
+import type { ClientConfig, LatencyMode, ServerMessage } from '../shared/protocol'
 import { DEFAULT_CONFIG, langEnName, parseClientMessage } from '../shared/protocol'
 import { VadSegmenter } from './vad'
 import { transcribe } from './whisper'
 import { Translator } from './translate'
+
+// Latency/quality presets: end-of-phrase wait (VAD) + translation model.
+// A TRANSLATE_MODEL env var, if set, overrides the model for every preset.
+const LATENCY_PRESETS: Record<LatencyMode, { hangoverMs: number; maxUtteranceMs: number; model: string }> = {
+  fast: { hangoverMs: 380, maxUtteranceMs: 6000, model: 'claude-haiku-4-5' },
+  balanced: { hangoverMs: 650, maxUtteranceMs: 9000, model: 'claude-sonnet-5' },
+  accurate: { hangoverMs: 950, maxUtteranceMs: 12000, model: 'claude-opus-4-8' },
+}
+const presetModel = (m: LatencyMode) => process.env.TRANSLATE_MODEL || LATENCY_PRESETS[m].model
+const makeVad = (m: LatencyMode) =>
+  new VadSegmenter({ hangoverMs: LATENCY_PRESETS[m].hangoverMs, maxUtteranceMs: LATENCY_PRESETS[m].maxUtteranceMs })
+const makeTranslator = (c: ClientConfig) => new Translator(langEnName(c.targetLang), presetModel(c.latency))
 
 // Load .env.local (ANTHROPIC_API_KEY, overrides) if present. Node 20.12+/22+.
 try {
@@ -85,10 +97,9 @@ const http = createServer((req, res) => {
 const wss = new WebSocketServer({ server: http, path: '/ws' })
 
 wss.on('connection', ws => {
-  const vad = new VadSegmenter()
-  let sourceLang = DEFAULT_CONFIG.sourceLang // 'auto' or an ISO-639-1 code
-  let targetLang = DEFAULT_CONFIG.targetLang
-  let translator = new Translator(langEnName(targetLang))
+  let cfg: ClientConfig = { ...DEFAULT_CONFIG }
+  let vad = makeVad(cfg.latency)
+  let translator = makeTranslator(cfg)
   let segId = 0
   let queue: Promise<void> = Promise.resolve()
 
@@ -101,15 +112,22 @@ wss.on('connection', ws => {
 
   ws.on('message', (data, isBinary) => {
     if (!isBinary) {
-      // Live config from the companion app (language selection).
-      const cfg = parseClientMessage(data.toString())
-      if (!cfg) return
-      sourceLang = cfg.sourceLang || 'auto'
-      if (cfg.targetLang && cfg.targetLang !== targetLang) {
-        targetLang = cfg.targetLang
-        translator = new Translator(langEnName(targetLang)) // fresh context in the new language
+      const m = parseClientMessage(data.toString())
+      if (!m) return
+      if (m.type === 'ping') {
+        send({ type: 'pong', t: m.t }) // RTT probe
+        return
       }
-      console.log(`config: ${sourceLang} → ${targetLang}`)
+      // Live config: language + latency preset.
+      const prev = cfg
+      cfg = {
+        sourceLang: m.sourceLang || 'auto',
+        targetLang: m.targetLang || prev.targetLang,
+        latency: m.latency || prev.latency,
+      }
+      if (cfg.latency !== prev.latency) vad = makeVad(cfg.latency)
+      if (cfg.targetLang !== prev.targetLang || cfg.latency !== prev.latency) translator = makeTranslator(cfg)
+      console.log(`config: ${cfg.sourceLang} → ${cfg.targetLang} · ${cfg.latency} (${presetModel(cfg.latency)})`)
       return
     }
     const pcm = Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer)
@@ -127,13 +145,15 @@ wss.on('connection', ws => {
   ws.on('error', err => console.error('ws error', err))
 
   async function handleSegment(pcm: Buffer) {
-    const stt = await transcribe(pcm, sourceLang === 'auto' ? undefined : sourceLang)
+    const t0 = Date.now()
+    const stt = await transcribe(pcm, cfg.sourceLang === 'auto' ? undefined : cfg.sourceLang)
     if (!stt) return
     send({ type: 'partial', source: stt.text })
     const target = await translator.translate(stt.text, stt.language)
     if (!target) return
-    send({ type: 'segment', id: segId++, source: stt.text, sourceLang: stt.language, target })
-    console.log(`[${stt.language}→${targetLang}] ${stt.text}  →  ${target}`)
+    const latencyMs = Date.now() - t0
+    send({ type: 'segment', id: segId++, source: stt.text, sourceLang: stt.language, target, latencyMs })
+    console.log(`[${stt.language}→${cfg.targetLang} ${latencyMs}ms] ${stt.text}  →  ${target}`)
   }
 })
 

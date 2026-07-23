@@ -69,11 +69,15 @@ export class BackendLink {
     ws.send(pcm.slice().buffer)
   }
 
-  /** Send a JSON control message (language config). */
-  sendConfig(msg: ClientMessage) {
+  /** Send a JSON control message (config or ping). */
+  send(msg: ClientMessage) {
     const ws = this.ws
     if (!ws || ws.readyState !== WebSocket.OPEN) return
     ws.send(JSON.stringify(msg))
+  }
+
+  get isOpen() {
+    return this.ws?.readyState === WebSocket.OPEN
   }
 
   close() {

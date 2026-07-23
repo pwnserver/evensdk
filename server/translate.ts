@@ -1,9 +1,8 @@
 import Anthropic from '@anthropic-ai/sdk'
 
-// Per the claude-api skill: default to claude-opus-4-8. For a live translator you
-// can trade a little quality for latency via TRANSLATE_MODEL (e.g. claude-haiku-4-5
-// or claude-sonnet-5). Opus 4.8 with thinking omitted runs without thinking (fast).
-const MODEL = process.env.TRANSLATE_MODEL ?? 'claude-opus-4-8'
+// Per the claude-api skill: default to claude-opus-4-8. The latency preset picks
+// the model per-connection; TRANSLATE_MODEL (if set) overrides that default.
+export const DEFAULT_MODEL = process.env.TRANSLATE_MODEL ?? 'claude-opus-4-8'
 const MAX_TOKENS = Number(process.env.TRANSLATE_MAX_TOKENS ?? 400)
 const HISTORY_TURNS = 5 // rolling context for coherence & terminology
 
@@ -24,11 +23,16 @@ type Turn = { source: string; target: string }
 export class Translator {
   private readonly client = new Anthropic()
   private readonly system: string
+  private readonly model: string
   private history: Turn[] = []
 
-  /** @param targetName English name of the language to translate into, e.g. "Russian". */
-  constructor(targetName = 'Russian') {
+  /**
+   * @param targetName English name of the language to translate into, e.g. "Russian".
+   * @param model Claude model id (defaults to DEFAULT_MODEL / env).
+   */
+  constructor(targetName = 'Russian', model = DEFAULT_MODEL) {
     this.system = systemPrompt(targetName)
+    this.model = model
   }
 
   async translate(source: string, sourceLang: string): Promise<string> {
@@ -41,7 +45,7 @@ export class Translator {
     messages.push({ role: 'user', content: `${source}${langHint}` })
 
     const res = await this.client.messages.create({
-      model: MODEL,
+      model: this.model,
       max_tokens: MAX_TOKENS,
       system: this.system,
       messages,
