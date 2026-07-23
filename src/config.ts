@@ -13,12 +13,18 @@ export function backendWsUrl(): string {
   return `${proto}//${location.host}/ws`
 }
 
-// Glasses render tuning.
+// Glasses render tuning — per the G2 display-design workflow recommendation.
 export const RENDER = {
-  // BLE render queue is slow — coalesce display writes.
-  debounceMs: 120,
-  // Rough character budget for the 576x288 text container at default font.
-  maxChars: 240,
-  // How many finalized lines to keep on screen at once.
-  maxLines: 4,
+  // BLE render queue is slow — coalesce display writes (~150ms).
+  debounceMs: 150,
+  // Bottom-anchored rolling buffer: keep the newest ~6 sentences visible.
+  maxLines: 6,
+  // Soft character budget per line (firmware font is fixed & proportional;
+  // this is an approximation until pixel-accurate measurement is wired in).
+  maxCharsPerLine: 24,
+  // Designers advise against a live ms counter (cognitive noise while walking):
+  // show latency ONLY by exception. Flip to true for an always-on ping readout.
+  showPersistentPing: false,
+  // Surface "LAG x.xs" when a translation round-trip exceeds this.
+  lagThresholdMs: 1000,
 } as const

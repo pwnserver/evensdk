@@ -25,35 +25,37 @@ let config = loadConfig()
 let muted = false
 let rtt: number | null = null // network round-trip ms
 let lastLatency: number | null = null // server STT+translate ms
+let lastSrcCode: string | null = null // detected source (for the EN>RU strip)
 
 const bridge = await waitForEvenAppBridge()
 
-// ---- Two containers: a thin top status strip + the translation area ----
-const STATUS_H = 32
+// ---- Two containers (per the G2 display-design workflow) ----
+// Status strip: slim, non-capture, top. Transcript body: the capture container.
+const STATUS_H = 28
 const statusBar = new TextContainerProperty({
   xPosition: 0,
   yPosition: 0,
   width: CANVAS.width,
   height: STATUS_H,
-  borderWidth: 0,
-  borderColor: 5,
-  paddingLength: 4,
+  borderWidth: 1,
+  borderColor: 5, // subtle bottom rule
+  paddingLength: 12,
   containerID: 2,
   containerName: 'status',
-  content: 'RU  net —  tr —',
-  isEventCapture: 1,
+  content: 'AUTO>RU  LIVE',
+  isEventCapture: 0,
 })
 const transBox = new TextContainerProperty({
   xPosition: 0,
-  yPosition: STATUS_H,
+  yPosition: STATUS_H + 2,
   width: CANVAS.width,
-  height: CANVAS.height - STATUS_H,
+  height: CANVAS.height - STATUS_H - 2,
   borderWidth: 0,
   borderColor: 5,
-  paddingLength: 4,
+  paddingLength: 12,
   containerID: 1,
   containerName: 'translation',
-  content: 'Наведите слух…',
+  content: 'Наведите слух...',
   isEventCapture: 1,
 })
 
@@ -65,40 +67,62 @@ if (created !== 0) {
   console.error('Failed to create startup page', created)
 }
 
-// ---- Glasses rendering ----
-const lines: string[] = []
-let pending = 'Наведите слух…'
-let lastTrans = ''
-let transTimer: number | null = null
+// ---- Transcript body: bottom-anchored rolling buffer, translation-only ----
+const sentences: string[] = []
+let provisional = false // a phrase is being translated → show trailing "..."
+let bodyPending = 'Наведите слух...'
+let bodyLast = ''
+let bodyTimer: number | null = null
 
-function scheduleTransRender() {
-  const text = lines.slice(-RENDER.maxLines).join('\n')
-  pending = text ? text.slice(-RENDER.maxChars) : 'Наведите слух…'
-  if (transTimer !== null) return
-  transTimer = window.setTimeout(async () => {
-    transTimer = null
-    if (pending === lastTrans) return
-    lastTrans = pending
+function composeBody(): string {
+  let text = sentences.slice(-RENDER.maxLines).join('\n')
+  if (provisional) text = text ? `${text}\n...` : '...'
+  if (!text) return 'Наведите слух...'
+  // Approximate front-trim so the newest content wins (pixel-accurate later).
+  const cap = RENDER.maxLines * RENDER.maxCharsPerLine
+  return text.length > cap ? text.slice(text.length - cap) : text
+}
+
+function renderBody() {
+  bodyPending = composeBody()
+  if (bodyTimer !== null) return
+  bodyTimer = window.setTimeout(async () => {
+    bodyTimer = null
+    if (bodyPending === bodyLast) return
+    bodyLast = bodyPending
     try {
       await bridge.textContainerUpgrade(
-        new TextContainerUpgrade({ containerID: 1, containerName: 'translation', content: pending }),
+        new TextContainerUpgrade({ containerID: 1, containerName: 'translation', content: bodyPending }),
       )
     } catch (err) {
-      console.error('trans render failed', err)
+      console.error('body render failed', err)
     }
   }, RENDER.debounceMs)
 }
 
-let lastStatus = ''
+// ---- Status strip: EN>RU LIVE/MUTE, lag by exception, OFFLINE on drop ----
+function whisperToCode(name: string): string {
+  const m = LANGUAGES.find(l => l.en.toLowerCase() === name.toLowerCase())
+  return m?.code ?? name.slice(0, 2)
+}
+
+let statusLast = ''
 function renderStatus() {
-  const parts: string[] = []
-  if (muted) parts.push('MUTE')
-  parts.push(config.targetLang.toUpperCase())
-  parts.push(rtt != null ? `net ${rtt}ms` : 'net —')
-  parts.push(lastLatency != null ? `tr ${lastLatency}ms` : 'tr —')
-  const content = parts.join('  ')
-  if (content === lastStatus) return
-  lastStatus = content
+  let content: string
+  if (!link.isOpen) {
+    content = 'OFFLINE'
+  } else {
+    const src = (config.sourceLang !== 'auto' ? config.sourceLang : (lastSrcCode ?? 'auto')).toUpperCase()
+    const tgt = config.targetLang.toUpperCase()
+    content = `${src}>${tgt}  ${muted ? 'MUTE' : 'LIVE'}`
+    if (RENDER.showPersistentPing) {
+      content += `  net ${rtt ?? '-'}ms  tr ${lastLatency ?? '-'}ms`
+    } else if (lastLatency != null && lastLatency > RENDER.lagThresholdMs) {
+      content += `  LAG ${(lastLatency / 1000).toFixed(1)}s`
+    }
+  }
+  if (content === statusLast) return
+  statusLast = content
   bridge
     .textContainerUpgrade(new TextContainerUpgrade({ containerID: 2, containerName: 'status', content }))
     .catch(err => console.error('status render failed', err))
@@ -108,9 +132,13 @@ function renderStatus() {
 const link = new BackendLink({
   onOpen: () => {
     setStatus('ready')
-    link.send({ type: 'config', ...config }) // (re)apply on (re)connect
+    link.send({ type: 'config', ...config })
+    renderStatus()
   },
-  onClose: () => setStatus('connecting'),
+  onClose: () => {
+    setStatus('connecting')
+    renderStatus() // → OFFLINE
+  },
   onMessage: msg => {
     switch (msg.type) {
       case 'status':
@@ -118,12 +146,16 @@ const link = new BackendLink({
         break
       case 'partial':
         setPartial(msg.source)
+        provisional = true
+        renderBody()
         break
       case 'segment':
-        lines.push(msg.target)
+        sentences.push(msg.target)
+        provisional = false
         lastLatency = msg.latencyMs
+        lastSrcCode = whisperToCode(msg.sourceLang)
         addSegment(msg.source, msg.target)
-        scheduleTransRender()
+        renderBody()
         renderStatus()
         break
       case 'pong':
@@ -203,7 +235,6 @@ const unsubscribe = bridge.onEvenHubEvent(event => {
   const sysType = event.sysEvent ? (event.sysEvent.eventType ?? OsEventTypeList.CLICK_EVENT) : null
   const textType = event.textEvent?.eventType ?? null
 
-  // Root-level exit: always reachable.
   if (sysType === OsEventTypeList.DOUBLE_CLICK_EVENT || textType === OsEventTypeList.DOUBLE_CLICK_EVENT) {
     bridge.shutDownPageContainer(1)
     return
