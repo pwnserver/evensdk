@@ -23,6 +23,11 @@ const STYLE = `
   :root { color-scheme: dark; }
   #app { display: flex; flex-direction: column; gap: 12px; padding: 16px; box-sizing: border-box; height: 100%; }
   .row { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+  details.submenu { border: 1px solid #2a2a2a; border-radius: 8px; }
+  details.submenu > summary { cursor: pointer; padding: 10px 12px; font-size: 13px; color: #b5b5b5; list-style: none; }
+  details.submenu > summary::-webkit-details-marker { display: none; }
+  details.submenu[open] > summary { border-bottom: 1px solid #2a2a2a; }
+  details.submenu .row { padding: 10px 12px; }
   .field { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 100px; }
   .field label { font-size: 11px; color: #8a8a8a; }
   .field select {
@@ -71,19 +76,22 @@ export function mountUi(opts: {
 
   const app = document.getElementById('app')!
   app.innerHTML = `
-    <div class="row">
-      <div class="field"><label for="src">Слышу</label><select id="src">${srcOptions}</select></div>
-      <div class="arrow">→</div>
-      <div class="field"><label for="tgt">Показываю</label><select id="tgt">${tgtOptions}</select></div>
-    </div>
-    <div class="row">
-      <div class="field"><label for="lat">Задержка</label><select id="lat">${latOptions}</select></div>
-      <button id="mute" type="button">🎙️ Слушаю</button>
-    </div>
+    <details class="submenu">
+      <summary>⚙ Языки и задержка</summary>
+      <div class="row">
+        <div class="field"><label for="src">Слышу</label><select id="src">${srcOptions}</select></div>
+        <div class="arrow">→</div>
+        <div class="field"><label for="tgt">Показываю</label><select id="tgt">${tgtOptions}</select></div>
+      </div>
+      <div class="row">
+        <div class="field"><label for="lat">Задержка</label><select id="lat">${latOptions}</select></div>
+      </div>
+    </details>
+    <div class="row"><button id="mute" type="button">🎙️ Слушаю</button></div>
     <div id="status" class="chip">Connecting…</div>
     <div id="partial"></div>
     <div id="lines"></div>
-    <div class="hint">Кольцо R1: крути — язык, одно нажатие — мьют, двойное — выход.</div>
+    <div class="hint">Кольцо R1: крути — прокрутка текста, нажатие — мьют, двойное — выход.</div>
   `
   statusEl = document.getElementById('status') as HTMLDivElement
   partialEl = document.getElementById('partial') as HTMLDivElement

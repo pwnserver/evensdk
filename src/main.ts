@@ -26,6 +26,7 @@ let muted = false
 let rtt: number | null = null // network round-trip ms
 let lastLatency: number | null = null // server STT+translate ms
 let lastSrcCode: string | null = null // detected source (for the EN>RU strip)
+let scrollOffset = 0 // ring-driven: 0 = follow newest, >0 = scrolled back into history
 
 const bridge = await waitForEvenAppBridge()
 
@@ -71,6 +72,7 @@ function composeStatus(): string {
   const src = (config.sourceLang !== 'auto' ? config.sourceLang : (lastSrcCode ?? 'auto')).toUpperCase()
   const tgt = config.targetLang.toUpperCase()
   let s = `${src}>${tgt}  ${muted ? 'MUTE' : 'LIVE'}`
+  if (scrollOffset > 0) s += '  HIST'
   if (RENDER.showPersistentPing) {
     s += `  net ${rtt ?? '-'}ms  tr ${lastLatency ?? '-'}ms`
   } else if (lastLatency != null && lastLatency > RENDER.lagThresholdMs) {
@@ -79,9 +81,23 @@ function composeStatus(): string {
   return s
 }
 
+function maxOffset(): number {
+  return Math.max(0, sentences.length - RENDER.maxLines)
+}
+
+function scrollBy(delta: number) {
+  const next = Math.min(Math.max(0, scrollOffset + delta), maxOffset())
+  if (next === scrollOffset) return
+  scrollOffset = next
+  render()
+}
+
 function composeBody(): string {
-  let text = sentences.slice(-RENDER.maxLines).join('\n')
-  if (provisional) text = text ? `${text}\n...` : '...'
+  const maxStart = maxOffset()
+  const start = Math.max(0, maxStart - scrollOffset)
+  const visible = sentences.slice(start, start + RENDER.maxLines)
+  let text = visible.join('\n')
+  if (provisional && scrollOffset === 0) text = text ? `${text}\n...` : '...'
   if (!text) return 'Наведите слух...'
   const cap = RENDER.maxLines * RENDER.maxCharsPerLine
   return text.length > cap ? text.slice(text.length - cap) : text
@@ -130,6 +146,8 @@ const link = new BackendLink({
         provisional = false
         lastLatency = msg.latencyMs
         lastSrcCode = whisperToCode(msg.sourceLang)
+        // If the user has scrolled back, keep their view anchored (don't yank).
+        if (scrollOffset > 0) scrollOffset = Math.min(scrollOffset + 1, maxOffset())
         addSegment(msg.source, msg.target)
         render()
         break
@@ -161,13 +179,6 @@ function toggleMute() {
   muted = !muted
   setMuted(muted)
   render()
-}
-
-function cycleTarget(dir: 1 | -1) {
-  const codes: string[] = LANGUAGES.map(l => l.code)
-  const i = Math.max(0, codes.indexOf(config.targetLang))
-  const next = codes[(i + dir + codes.length) % codes.length]
-  applyConfig({ ...config, targetLang: next }, true)
 }
 
 mountUi({
@@ -222,8 +233,9 @@ const unsubscribe = bridge.onEvenHubEvent(event => {
     toggleMute()
     return
   }
-  if (textType === OsEventTypeList.SCROLL_TOP_EVENT) cycleTarget(-1)
-  else if (textType === OsEventTypeList.SCROLL_BOTTOM_EVENT) cycleTarget(1)
+  // Ring rotate → scroll the translation history (up = older, down = newer).
+  if (textType === OsEventTypeList.SCROLL_TOP_EVENT) scrollBy(1)
+  else if (textType === OsEventTypeList.SCROLL_BOTTOM_EVENT) scrollBy(-1)
 })
 
 window.addEventListener('beforeunload', cleanup)
