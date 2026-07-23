@@ -27,6 +27,7 @@ let rtt: number | null = null // network round-trip ms
 let lastLatency: number | null = null // server STT+translate ms
 let lastSrcCode: string | null = null // detected source (for the EN>RU strip)
 let scrollOffset = 0 // ring: 0 = follow newest, >0 = scrolled back into history
+let hidden = false // single tap hides the transcript (non-destructive); tap again shows it
 
 const bridge = await waitForEvenAppBridge()
 
@@ -80,25 +81,27 @@ function maxOffset(): number {
 }
 
 function scrollBy(delta: number) {
+  if (hidden) hidden = false // scrolling brings the text back
   const next = Math.min(Math.max(0, scrollOffset + delta), maxOffset())
-  if (next === scrollOffset) return
+  if (next === scrollOffset && !hidden) return
   scrollOffset = next
+  bodyLast = ''
   renderBody()
   renderStatus()
 }
 
-// Single ring tap → clear the on-glasses transcript (safe & reversible: history
-// stays in the companion app; a stray tap just clears, no silent mic mute).
-function clearTranscript() {
-  sentences.length = 0
-  provisional = false
-  scrollOffset = 0
-  bodyLast = '' // force a redraw to the placeholder
+// Single ring tap → hide/show the transcript (non-destructive). Nothing is
+// deleted, so a tap again (or a scroll) brings it right back — safe against a
+// stray tap, unlike a silent mic mute.
+function toggleTranscript() {
+  hidden = !hidden
+  bodyLast = '' // force a redraw
   renderBody()
   renderStatus()
 }
 
 function composeBody(): string {
+  if (hidden) return ' '
   const start = Math.max(0, maxOffset() - scrollOffset)
   let text = sentences.slice(start, start + RENDER.maxLines).join('\n')
   if (provisional && scrollOffset === 0) text = text ? `${text}\n...` : '...'
@@ -139,7 +142,8 @@ function renderStatus() {
     const src = (config.sourceLang !== 'auto' ? config.sourceLang : (lastSrcCode ?? 'auto')).toUpperCase()
     const tgt = config.targetLang.toUpperCase()
     content = `${src}>${tgt}  ${muted ? 'MUTE' : 'LIVE'}`
-    if (scrollOffset > 0) content += '  HIST'
+    if (hidden) content += '  HIDE'
+    else if (scrollOffset > 0) content += '  HIST'
     if (RENDER.showPersistentPing) {
       content += `  net ${rtt ?? '-'}ms  tr ${lastLatency ?? '-'}ms`
     } else if (lastLatency != null && lastLatency > RENDER.lagThresholdMs) {
@@ -266,7 +270,7 @@ const unsubscribe = bridge.onEvenHubEvent(event => {
     return
   }
   if (sysType === OsEventTypeList.CLICK_EVENT) {
-    clearTranscript()
+    toggleTranscript()
     return
   }
   if (textType === OsEventTypeList.SCROLL_TOP_EVENT) scrollBy(1)
