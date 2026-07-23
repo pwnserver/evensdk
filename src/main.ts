@@ -87,6 +87,17 @@ function scrollBy(delta: number) {
   renderStatus()
 }
 
+// Single ring tap → clear the on-glasses transcript (safe & reversible: history
+// stays in the companion app; a stray tap just clears, no silent mic mute).
+function clearTranscript() {
+  sentences.length = 0
+  provisional = false
+  scrollOffset = 0
+  bodyLast = '' // force a redraw to the placeholder
+  renderBody()
+  renderStatus()
+}
+
 function composeBody(): string {
   const start = Math.max(0, maxOffset() - scrollOffset)
   let text = sentences.slice(start, start + RENDER.maxLines).join('\n')
@@ -251,9 +262,13 @@ const unsubscribe = bridge.onEvenHubEvent(event => {
     cleanup()
     return
   }
-  // NB: on this device a temple tap/double-tap is the system "hide app" gesture,
-  // so we do NOT bind mute/exit to taps (a stray CLICK could mute the mic).
-  // Mute lives on the companion button; the ring is the only on-glasses control.
+  // Single tap → clear the transcript (safe/reversible). Mute stays on the phone
+  // button — a silent-failure action shouldn't ride an unreliable tap, and there
+  // is no long-press event in the SDK.
+  if (sysType === OsEventTypeList.CLICK_EVENT) {
+    clearTranscript()
+    return
+  }
   // Ring rotate → scroll the translation history (up = older, down = newer).
   if (textType === OsEventTypeList.SCROLL_TOP_EVENT) scrollBy(1)
   else if (textType === OsEventTypeList.SCROLL_BOTTOM_EVENT) scrollBy(-1)
