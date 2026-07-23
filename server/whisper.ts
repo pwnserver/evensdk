@@ -32,15 +32,16 @@ function looksLikeNoise(text: string): boolean {
 
 /**
  * Transcribe one utterance via a running whisper-server (whisper.cpp).
- * `language: 'auto'` lets whisper detect the spoken language.
+ * `language: 'auto'` (default) lets whisper detect the spoken language;
+ * pass a specific ISO-639-1 code to pin it.
  */
-export async function transcribe(pcm: Buffer): Promise<Transcript | null> {
+export async function transcribe(pcm: Buffer, language?: string): Promise<Transcript | null> {
   const wav = pcm16ToWav(pcm)
   const form = new FormData()
   form.append('file', new Blob([wav], { type: 'audio/wav' }), 'audio.wav')
   form.append('response_format', 'verbose_json')
   form.append('temperature', '0')
-  form.append('language', process.env.WHISPER_LANGUAGE ?? 'auto')
+  form.append('language', language || process.env.WHISPER_LANGUAGE || 'auto')
 
   const res = await fetch(`${WHISPER_URL}${INFERENCE_PATH}`, { method: 'POST', body: form })
   if (!res.ok) {

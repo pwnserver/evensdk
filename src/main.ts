@@ -6,10 +6,22 @@ import {
   OsEventTypeList,
 } from '@evenrealities/even_hub_sdk'
 import { CANVAS, RENDER } from './config'
+import { DEFAULT_CONFIG, type ClientConfig } from '../shared/protocol'
 import { BackendLink } from './net'
 import { mountUi, setStatus, setPartial, addSegment } from './ui'
 
-mountUi()
+// Language config, persisted on the phone across launches.
+const CONFIG_KEY = 'even-translate-config'
+function loadConfig(): ClientConfig {
+  try {
+    const raw = localStorage.getItem(CONFIG_KEY)
+    if (raw) return { ...DEFAULT_CONFIG, ...(JSON.parse(raw) as Partial<ClientConfig>) }
+  } catch {
+    /* ignore */
+  }
+  return { ...DEFAULT_CONFIG }
+}
+let config = loadConfig()
 
 const bridge = await waitForEvenAppBridge()
 
@@ -66,7 +78,10 @@ function scheduleRender() {
 
 // ---- Backend link: PCM up, translations down ----
 const link = new BackendLink({
-  onOpen: () => setStatus('ready'),
+  onOpen: () => {
+    setStatus('ready')
+    link.sendConfig({ type: 'config', ...config }) // (re)apply language selection on (re)connect
+  },
   onClose: () => setStatus('connecting'),
   onMessage: msg => {
     switch (msg.type) {
@@ -87,6 +102,21 @@ const link = new BackendLink({
     }
   },
 })
+
+// Settings menu: apply + persist + push to backend on change.
+mountUi({
+  config,
+  onConfig: cfg => {
+    config = cfg
+    try {
+      localStorage.setItem(CONFIG_KEY, JSON.stringify(cfg))
+    } catch {
+      /* ignore */
+    }
+    link.sendConfig({ type: 'config', ...cfg })
+  },
+})
+
 link.connect()
 
 // ---- Mic capture ----

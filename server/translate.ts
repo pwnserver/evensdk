@@ -7,21 +7,29 @@ const MODEL = process.env.TRANSLATE_MODEL ?? 'claude-opus-4-8'
 const MAX_TOKENS = Number(process.env.TRANSLATE_MAX_TOKENS ?? 400)
 const HISTORY_TURNS = 5 // rolling context for coherence & terminology
 
-const SYSTEM = `You are a professional live interpreter. You translate spoken foreign speech into natural, fluent Russian.
+function systemPrompt(targetName: string): string {
+  return `You are a professional live interpreter. You translate spoken speech into natural, fluent ${targetName}.
 
 Rules:
-- Output ONLY the Russian translation. No quotes, no notes, no explanations, no source text.
+- Output ONLY the ${targetName} translation. No quotes, no notes, no explanations, no source text.
 - The input comes from speech recognition and may contain small errors — silently correct obvious mishearings using context.
 - Preserve proper names, numbers, places, and the speaker's tone and register.
 - Keep it conversational and idiomatic, the way a skilled human interpreter would say it — not word-for-word.
 - Prior turns are given for context so pronouns, gender, and terminology stay consistent. Translate only the latest line.
-- If the latest line is already Russian, return it lightly cleaned up.`
+- If the latest line is already in ${targetName}, return it lightly cleaned up.`
+}
 
 type Turn = { source: string; target: string }
 
 export class Translator {
   private readonly client = new Anthropic()
+  private readonly system: string
   private history: Turn[] = []
+
+  /** @param targetName English name of the language to translate into, e.g. "Russian". */
+  constructor(targetName = 'Russian') {
+    this.system = systemPrompt(targetName)
+  }
 
   async translate(source: string, sourceLang: string): Promise<string> {
     const messages: Anthropic.MessageParam[] = []
@@ -35,7 +43,7 @@ export class Translator {
     const res = await this.client.messages.create({
       model: MODEL,
       max_tokens: MAX_TOKENS,
-      system: SYSTEM,
+      system: this.system,
       messages,
     })
 

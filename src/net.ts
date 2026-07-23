@@ -1,4 +1,4 @@
-import { parseServerMessage, type ServerMessage } from '../shared/protocol'
+import { parseServerMessage, type ClientMessage, type ServerMessage } from '../shared/protocol'
 import { backendWsUrl } from './config'
 
 type Handlers = {
@@ -67,6 +67,13 @@ export class BackendLink {
     if (!ws || ws.readyState !== WebSocket.OPEN) return
     // Copy into a standalone ArrayBuffer — the SDK may reuse the backing buffer.
     ws.send(pcm.slice().buffer)
+  }
+
+  /** Send a JSON control message (language config). */
+  sendConfig(msg: ClientMessage) {
+    const ws = this.ws
+    if (!ws || ws.readyState !== WebSocket.OPEN) return
+    ws.send(JSON.stringify(msg))
   }
 
   close() {

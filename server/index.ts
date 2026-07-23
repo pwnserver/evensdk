@@ -5,6 +5,7 @@ import { extname, normalize } from 'node:path'
 import process from 'node:process'
 import { WebSocketServer, WebSocket } from 'ws'
 import type { ServerMessage } from '../shared/protocol'
+import { DEFAULT_CONFIG, langEnName, parseClientMessage } from '../shared/protocol'
 import { VadSegmenter } from './vad'
 import { transcribe } from './whisper'
 import { Translator } from './translate'
@@ -85,7 +86,9 @@ const wss = new WebSocketServer({ server: http, path: '/ws' })
 
 wss.on('connection', ws => {
   const vad = new VadSegmenter()
-  const translator = new Translator()
+  let sourceLang = DEFAULT_CONFIG.sourceLang // 'auto' or an ISO-639-1 code
+  let targetLang = DEFAULT_CONFIG.targetLang
+  let translator = new Translator(langEnName(targetLang))
   let segId = 0
   let queue: Promise<void> = Promise.resolve()
 
@@ -97,7 +100,18 @@ wss.on('connection', ws => {
   console.log('client connected')
 
   ws.on('message', (data, isBinary) => {
-    if (!isBinary) return
+    if (!isBinary) {
+      // Live config from the companion app (language selection).
+      const cfg = parseClientMessage(data.toString())
+      if (!cfg) return
+      sourceLang = cfg.sourceLang || 'auto'
+      if (cfg.targetLang && cfg.targetLang !== targetLang) {
+        targetLang = cfg.targetLang
+        translator = new Translator(langEnName(targetLang)) // fresh context in the new language
+      }
+      console.log(`config: ${sourceLang} → ${targetLang}`)
+      return
+    }
     const pcm = Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer)
     for (const segment of vad.push(pcm)) {
       queue = queue
@@ -113,13 +127,13 @@ wss.on('connection', ws => {
   ws.on('error', err => console.error('ws error', err))
 
   async function handleSegment(pcm: Buffer) {
-    const stt = await transcribe(pcm)
+    const stt = await transcribe(pcm, sourceLang === 'auto' ? undefined : sourceLang)
     if (!stt) return
     send({ type: 'partial', source: stt.text })
     const target = await translator.translate(stt.text, stt.language)
     if (!target) return
     send({ type: 'segment', id: segId++, source: stt.text, sourceLang: stt.language, target })
-    console.log(`[${stt.language}] ${stt.text}  →  ${target}`)
+    console.log(`[${stt.language}→${targetLang}] ${stt.text}  →  ${target}`)
   }
 })
 
