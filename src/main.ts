@@ -247,6 +247,9 @@ function cleanup() {
 //   • sysEvent CLICK (0, arrives undefined) → toggle mute.
 //   • sysEvent/textEvent DOUBLE_CLICK → exit.
 //   • textEvent SCROLL_TOP / SCROLL_BOTTOM (ring rotate) → cycle target language.
+// Tactile map (this device): single tap → clear, double tap → mute,
+// ring rotate → scroll history. Long-press is the OS menu / app switcher (exit),
+// so the app is left via the system, not a bound gesture.
 const unsubscribe = bridge.onEvenHubEvent(event => {
   const pcm = event.audioEvent?.audioPcm
   if (pcm && !muted) link.sendPcm(pcm)
@@ -255,21 +258,17 @@ const unsubscribe = bridge.onEvenHubEvent(event => {
   const textType = event.textEvent?.eventType ?? null
 
   if (sysType === OsEventTypeList.DOUBLE_CLICK_EVENT || textType === OsEventTypeList.DOUBLE_CLICK_EVENT) {
-    bridge.shutDownPageContainer(1)
+    toggleMute()
     return
   }
   if (sysType === OsEventTypeList.SYSTEM_EXIT_EVENT || sysType === OsEventTypeList.ABNORMAL_EXIT_EVENT) {
     cleanup()
     return
   }
-  // Single tap → clear the transcript (safe/reversible). Mute stays on the phone
-  // button — a silent-failure action shouldn't ride an unreliable tap, and there
-  // is no long-press event in the SDK.
   if (sysType === OsEventTypeList.CLICK_EVENT) {
     clearTranscript()
     return
   }
-  // Ring rotate → scroll the translation history (up = older, down = newer).
   if (textType === OsEventTypeList.SCROLL_TOP_EVENT) scrollBy(1)
   else if (textType === OsEventTypeList.SCROLL_BOTTOM_EVENT) scrollBy(-1)
 })
