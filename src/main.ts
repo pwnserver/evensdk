@@ -56,7 +56,7 @@ const transBox = new TextContainerProperty({
   paddingLength: 12,
   containerID: 1,
   containerName: 'translation',
-  content: 'Наведите слух...',
+  content: ' ', // empty until the first translation (no persistent placeholder)
   isEventCapture: 1,
 })
 
@@ -71,7 +71,7 @@ if (created !== 0) {
 // ---- Transcript body: bottom-anchored rolling buffer, translation-only ----
 const sentences: string[] = []
 let provisional = false // a phrase is being translated → show trailing "..."
-let bodyPending = 'Наведите слух...'
+let bodyPending = ' '
 let bodyLast = ''
 let bodyTimer: number | null = null
 
@@ -102,7 +102,7 @@ function composeBody(): string {
   const start = Math.max(0, maxOffset() - scrollOffset)
   let text = sentences.slice(start, start + RENDER.maxLines).join('\n')
   if (provisional && scrollOffset === 0) text = text ? `${text}\n...` : '...'
-  if (!text) return 'Наведите слух...'
+  if (!text) return ' ' // blank until there's a translation
   const cap = RENDER.maxLines * RENDER.maxCharsPerLine
   return text.length > cap ? text.slice(text.length - cap) : text
 }
