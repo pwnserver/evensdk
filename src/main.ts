@@ -38,9 +38,9 @@ const statusBar = new TextContainerProperty({
   yPosition: 0,
   width: CANVAS.width,
   height: STATUS_H,
-  borderWidth: 1,
-  borderColor: 5, // subtle bottom rule
-  paddingLength: 2, // small — 12 clipped the glyphs on this thin strip
+  borderWidth: 0, // no frame
+  borderColor: 5,
+  paddingLength: 2,
   containerID: 2,
   containerName: 'status',
   content: 'AUTO>RU  LIVE',
@@ -251,10 +251,9 @@ const unsubscribe = bridge.onEvenHubEvent(event => {
     cleanup()
     return
   }
-  if (sysType === OsEventTypeList.CLICK_EVENT) {
-    toggleMute()
-    return
-  }
+  // NB: on this device a temple tap/double-tap is the system "hide app" gesture,
+  // so we do NOT bind mute/exit to taps (a stray CLICK could mute the mic).
+  // Mute lives on the companion button; the ring is the only on-glasses control.
   // Ring rotate → scroll the translation history (up = older, down = newer).
   if (textType === OsEventTypeList.SCROLL_TOP_EVENT) scrollBy(1)
   else if (textType === OsEventTypeList.SCROLL_BOTTOM_EVENT) scrollBy(-1)

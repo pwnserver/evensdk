@@ -13,8 +13,10 @@ import { Translator } from './translate'
 // Latency/quality presets: end-of-phrase wait (VAD) + translation model.
 // A TRANSLATE_MODEL env var, if set, overrides the model for every preset.
 const LATENCY_PRESETS: Record<LatencyMode, { hangoverMs: number; maxUtteranceMs: number; model: string }> = {
+  // Default to opus-4-8 everywhere (confirmed working on this key). "fast" tries
+  // haiku for lower latency; if the key lacks it, only that preset errors.
   fast: { hangoverMs: 380, maxUtteranceMs: 6000, model: 'claude-haiku-4-5' },
-  balanced: { hangoverMs: 650, maxUtteranceMs: 9000, model: 'claude-sonnet-5' },
+  balanced: { hangoverMs: 650, maxUtteranceMs: 9000, model: 'claude-opus-4-8' },
   accurate: { hangoverMs: 950, maxUtteranceMs: 12000, model: 'claude-opus-4-8' },
 }
 const presetModel = (m: LatencyMode) => process.env.TRANSLATE_MODEL || LATENCY_PRESETS[m].model
