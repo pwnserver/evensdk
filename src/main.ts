@@ -29,103 +29,79 @@ let lastSrcCode: string | null = null // detected source (for the EN>RU strip)
 
 const bridge = await waitForEvenAppBridge()
 
-// ---- Two containers (per the G2 display-design workflow) ----
-// Status strip: slim, non-capture, top. Transcript body: the capture container.
-const STATUS_H = 36
-const statusBar = new TextContainerProperty({
+// ---- Single full-canvas container (proven-working layout) ----
+// Status is rendered as the top line inside the same container; translations
+// below. One container = no multi-container rendering pitfalls.
+const screen = new TextContainerProperty({
   xPosition: 0,
   yPosition: 0,
   width: CANVAS.width,
-  height: STATUS_H,
-  borderWidth: 0, // no frame — it clipped the glyphs on a thin strip
-  borderColor: 5,
-  paddingLength: 4,
-  containerID: 2,
-  containerName: 'status',
-  content: 'AUTO>RU  LIVE',
-  isEventCapture: 0,
-})
-const transBox = new TextContainerProperty({
-  xPosition: 0,
-  yPosition: STATUS_H,
-  width: CANVAS.width,
-  height: CANVAS.height - STATUS_H,
+  height: CANVAS.height,
   borderWidth: 0,
   borderColor: 5,
-  paddingLength: 8,
+  paddingLength: 4,
   containerID: 1,
-  containerName: 'translation',
+  containerName: 'main',
   content: 'Наведите слух...',
   isEventCapture: 1,
 })
 
 const created = await bridge.createStartUpPageContainer(
-  new CreateStartUpPageContainer({ containerTotalNum: 2, textObject: [statusBar, transBox] }),
+  new CreateStartUpPageContainer({ containerTotalNum: 1, textObject: [screen] }),
 )
 if (created !== 0) {
   setStatus('error', `createStartUpPageContainer failed: ${created}`)
   console.error('Failed to create startup page', created)
 }
 
-// ---- Transcript body: bottom-anchored rolling buffer, translation-only ----
+// ---- Glasses rendering: one container = [status line] + [translations] ----
 const sentences: string[] = []
 let provisional = false // a phrase is being translated → show trailing "..."
-let bodyPending = 'Наведите слух...'
-let bodyLast = ''
-let bodyTimer: number | null = null
+let renderPending = ''
+let renderLast = ''
+let renderTimer: number | null = null
 
-function composeBody(): string {
-  let text = sentences.slice(-RENDER.maxLines).join('\n')
-  if (provisional) text = text ? `${text}\n...` : '...'
-  if (!text) return 'Наведите слух...'
-  // Approximate front-trim so the newest content wins (pixel-accurate later).
-  const cap = RENDER.maxLines * RENDER.maxCharsPerLine
-  return text.length > cap ? text.slice(text.length - cap) : text
-}
-
-function renderBody() {
-  bodyPending = composeBody()
-  if (bodyTimer !== null) return
-  bodyTimer = window.setTimeout(async () => {
-    bodyTimer = null
-    if (bodyPending === bodyLast) return
-    bodyLast = bodyPending
-    try {
-      await bridge.textContainerUpgrade(
-        new TextContainerUpgrade({ containerID: 1, containerName: 'translation', content: bodyPending }),
-      )
-    } catch (err) {
-      console.error('body render failed', err)
-    }
-  }, RENDER.debounceMs)
-}
-
-// ---- Status strip: EN>RU LIVE/MUTE, lag by exception, OFFLINE on drop ----
 function whisperToCode(name: string): string {
   const m = LANGUAGES.find(l => l.en.toLowerCase() === name.toLowerCase())
   return m?.code ?? name.slice(0, 2)
 }
 
-let statusLast = ''
-function renderStatus() {
-  let content: string
-  if (!link.isOpen) {
-    content = 'OFFLINE'
-  } else {
-    const src = (config.sourceLang !== 'auto' ? config.sourceLang : (lastSrcCode ?? 'auto')).toUpperCase()
-    const tgt = config.targetLang.toUpperCase()
-    content = `${src}>${tgt}  ${muted ? 'MUTE' : 'LIVE'}`
-    if (RENDER.showPersistentPing) {
-      content += `  net ${rtt ?? '-'}ms  tr ${lastLatency ?? '-'}ms`
-    } else if (lastLatency != null && lastLatency > RENDER.lagThresholdMs) {
-      content += `  LAG ${(lastLatency / 1000).toFixed(1)}s`
-    }
+function composeStatus(): string {
+  if (!link.isOpen) return 'OFFLINE'
+  const src = (config.sourceLang !== 'auto' ? config.sourceLang : (lastSrcCode ?? 'auto')).toUpperCase()
+  const tgt = config.targetLang.toUpperCase()
+  let s = `${src}>${tgt}  ${muted ? 'MUTE' : 'LIVE'}`
+  if (RENDER.showPersistentPing) {
+    s += `  net ${rtt ?? '-'}ms  tr ${lastLatency ?? '-'}ms`
+  } else if (lastLatency != null && lastLatency > RENDER.lagThresholdMs) {
+    s += `  LAG ${(lastLatency / 1000).toFixed(1)}s`
   }
-  if (content === statusLast) return
-  statusLast = content
-  bridge
-    .textContainerUpgrade(new TextContainerUpgrade({ containerID: 2, containerName: 'status', content }))
-    .catch(err => console.error('status render failed', err))
+  return s
+}
+
+function composeBody(): string {
+  let text = sentences.slice(-RENDER.maxLines).join('\n')
+  if (provisional) text = text ? `${text}\n...` : '...'
+  if (!text) return 'Наведите слух...'
+  const cap = RENDER.maxLines * RENDER.maxCharsPerLine
+  return text.length > cap ? text.slice(text.length - cap) : text
+}
+
+function render() {
+  renderPending = `${composeStatus()}\n\n${composeBody()}`
+  if (renderTimer !== null) return
+  renderTimer = window.setTimeout(async () => {
+    renderTimer = null
+    if (renderPending === renderLast) return
+    renderLast = renderPending
+    try {
+      await bridge.textContainerUpgrade(
+        new TextContainerUpgrade({ containerID: 1, containerName: 'main', content: renderPending }),
+      )
+    } catch (err) {
+      console.error('render failed', err)
+    }
+  }, RENDER.debounceMs)
 }
 
 // ---- Backend link ----
@@ -133,11 +109,11 @@ const link = new BackendLink({
   onOpen: () => {
     setStatus('ready')
     link.send({ type: 'config', ...config })
-    renderStatus()
+    render()
   },
   onClose: () => {
     setStatus('connecting')
-    renderStatus() // → OFFLINE
+    render() // → OFFLINE
   },
   onMessage: msg => {
     switch (msg.type) {
@@ -147,7 +123,7 @@ const link = new BackendLink({
       case 'partial':
         setPartial(msg.source)
         provisional = true
-        renderBody()
+        render()
         break
       case 'segment':
         sentences.push(msg.target)
@@ -155,12 +131,11 @@ const link = new BackendLink({
         lastLatency = msg.latencyMs
         lastSrcCode = whisperToCode(msg.sourceLang)
         addSegment(msg.source, msg.target)
-        renderBody()
-        renderStatus()
+        render()
         break
       case 'pong':
         rtt = Math.max(0, Date.now() - msg.t)
-        renderStatus()
+        render()
         break
       case 'error':
         setStatus('error', msg.message)
@@ -179,13 +154,13 @@ function applyConfig(next: ClientConfig, reflectInUi: boolean) {
   }
   link.send({ type: 'config', ...config })
   if (reflectInUi) syncConfig(config)
-  renderStatus()
+  render()
 }
 
 function toggleMute() {
   muted = !muted
   setMuted(muted)
-  renderStatus()
+  render()
 }
 
 function cycleTarget(dir: 1 | -1) {
@@ -207,7 +182,7 @@ link.connect()
 // ---- Mic + latency ping ----
 await bridge.audioControl(true)
 setStatus('listening')
-renderStatus()
+render()
 
 const pingTimer = window.setInterval(() => {
   if (link.isOpen) link.send({ type: 'ping', t: Date.now() })
