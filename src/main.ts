@@ -31,15 +31,15 @@ const bridge = await waitForEvenAppBridge()
 
 // ---- Two containers (per the G2 display-design workflow) ----
 // Status strip: slim, non-capture, top. Transcript body: the capture container.
-const STATUS_H = 28
+const STATUS_H = 36
 const statusBar = new TextContainerProperty({
   xPosition: 0,
   yPosition: 0,
   width: CANVAS.width,
   height: STATUS_H,
-  borderWidth: 1,
-  borderColor: 5, // subtle bottom rule
-  paddingLength: 12,
+  borderWidth: 0, // no frame — it clipped the glyphs on a thin strip
+  borderColor: 5,
+  paddingLength: 4,
   containerID: 2,
   containerName: 'status',
   content: 'AUTO>RU  LIVE',
@@ -47,12 +47,12 @@ const statusBar = new TextContainerProperty({
 })
 const transBox = new TextContainerProperty({
   xPosition: 0,
-  yPosition: STATUS_H + 2,
+  yPosition: STATUS_H,
   width: CANVAS.width,
-  height: CANVAS.height - STATUS_H - 2,
+  height: CANVAS.height - STATUS_H,
   borderWidth: 0,
   borderColor: 5,
-  paddingLength: 12,
+  paddingLength: 8,
   containerID: 1,
   containerName: 'translation',
   content: 'Наведите слух...',
