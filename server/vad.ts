@@ -17,10 +17,10 @@ export type VadConfig = {
 
 export const DEFAULT_VAD: VadConfig = {
   hangoverMs: 700,
-  minVoicedMs: 350,
+  minVoicedMs: 400, // require ~0.4s of real voice (cuts noise-only blips)
   maxUtteranceMs: 9000,
-  speechRatio: 2.2,
-  minRms: 260, // ~ -42 dBFS on int16
+  speechRatio: 2.5, // speech must clearly exceed the noise floor
+  minRms: 320, // ~ -40 dBFS on int16 — ignore quiet room tone
 }
 
 function rms16(chunk: Buffer): number {

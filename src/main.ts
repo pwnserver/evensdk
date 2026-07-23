@@ -11,17 +11,10 @@ import { BackendLink } from './net'
 import { mountUi, setStatus, setPartial, addSegment, setMuted, syncConfig } from './ui'
 
 // ---- Persisted language/latency config ----
+// Use the SDK's durable storage (bridge.get/setLocalStorage) — the WebView's own
+// localStorage does NOT survive an app reload in the Even companion app.
 const CONFIG_KEY = 'even-translate-config'
-function loadConfig(): ClientConfig {
-  try {
-    const raw = localStorage.getItem(CONFIG_KEY)
-    if (raw) return { ...DEFAULT_CONFIG, ...(JSON.parse(raw) as Partial<ClientConfig>) }
-  } catch {
-    /* ignore */
-  }
-  return { ...DEFAULT_CONFIG }
-}
-let config = loadConfig()
+let config: ClientConfig = { ...DEFAULT_CONFIG }
 let muted = false
 let rtt: number | null = null // network round-trip ms
 let lastLatency: number | null = null // server STT+translate ms
@@ -30,6 +23,17 @@ let scrollOffset = 0 // ring: 0 = follow newest, >0 = scrolled back into history
 let hidden = false // single tap hides the transcript (non-destructive); tap again shows it
 
 const bridge = await waitForEvenAppBridge()
+
+async function loadConfig(): Promise<ClientConfig> {
+  try {
+    const raw = await bridge.getLocalStorage(CONFIG_KEY)
+    if (raw) return { ...DEFAULT_CONFIG, ...(JSON.parse(raw) as Partial<ClientConfig>) }
+  } catch {
+    /* ignore */
+  }
+  return { ...DEFAULT_CONFIG }
+}
+config = await loadConfig()
 
 // ---- Two containers (per the G2 display-design workflow) ----
 // Status strip: slim, non-capture, top. Transcript body: the capture container.
@@ -202,11 +206,7 @@ const link = new BackendLink({
 // ---- Config + mute helpers ----
 function applyConfig(next: ClientConfig, reflectInUi: boolean) {
   config = next
-  try {
-    localStorage.setItem(CONFIG_KEY, JSON.stringify(config))
-  } catch {
-    /* ignore */
-  }
+  void bridge.setLocalStorage(CONFIG_KEY, JSON.stringify(config)).catch(() => {})
   link.send({ type: 'config', ...config })
   if (reflectInUi) syncConfig(config)
   renderStatus()

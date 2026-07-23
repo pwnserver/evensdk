@@ -5,7 +5,8 @@ const INFERENCE_PATH = process.env.WHISPER_INFERENCE_PATH ?? '/inference'
 
 export type Transcript = { text: string; language: string }
 
-// whisper.cpp emits these placeholders on silence / music / non-speech.
+// whisper.cpp emits these placeholders/hallucinations on silence / music /
+// non-speech. Exact-match set (lowercased).
 const HALLUCINATIONS = new Set(
   [
     '[blank_audio]',
@@ -15,19 +16,40 @@ const HALLUCINATIONS = new Set(
     'you',
     'thank you.',
     'thanks for watching!',
+    'bye.',
+    'bye bye.',
     '[music]',
     '(music)',
     '[ pause ]',
+    '.',
+    '..',
+    '...',
+    '!',
+    '?',
+    'продолжение следует...',
+    'субтитры',
   ].map(s => s.toLowerCase()),
 )
 
+// Pattern-based hallucinations (sound-event annotations, subtitle credits, etc.)
+// Tested against the raw source text (any language) before translation.
+const HALLUCINATION_PATTERNS: RegExp[] = [
+  /^\s*\*.*\*\s*$/, // *sizzling*, *Spannungsgeladene Musik*
+  /^\s*[[(].*[\])]\s*$/, // [music], (wind blowing)
+  /untertitel/i, // German subtitle credits (ZDF, ...)
+  /amara\.org/i,
+  /\bsubtitl/i, // "subtitles by ..."
+  /\bzdf\b/i,
+  /перевод\s+субтитров|субтитры\s+(?:зд|by|—)/i,
+  /thanks?\s+for\s+watching/i,
+  /(?:please\s+)?subscribe/i,
+]
+
 function looksLikeNoise(text: string): boolean {
-  const t = text.trim().toLowerCase()
+  const t = text.trim()
   if (t.length < 2) return true
-  if (HALLUCINATIONS.has(t)) return true
-  // Pure bracketed annotation, e.g. "[wind blowing]".
-  if (/^[[(].*[\])]$/.test(t)) return true
-  return false
+  if (HALLUCINATIONS.has(t.toLowerCase())) return true
+  return HALLUCINATION_PATTERNS.some(re => re.test(t))
 }
 
 /**
