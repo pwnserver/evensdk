@@ -15,9 +15,10 @@ export function backendWsUrl(): string {
 
 import type { WidthMode } from '../shared/protocol'
 
-// Manual wrap column per width setting (firmware wraps ~24 chars at full width;
-// smaller values force a narrower text column by inserting line breaks).
-export const WIDTH_CPL: Record<WidthMode, number> = { full: 24, medium: 18, narrow: 13 }
+// Manual wrap column per width setting. "full" ≈ the firmware's real full-width
+// capacity (observed: ~24 chars fills only ~half the screen → full ≈ ~48). Lower
+// values force a narrower text column by wrapping earlier.
+export const WIDTH_CPL: Record<WidthMode, number> = { full: 46, medium: 32, narrow: 20 }
 
 // Glasses render tuning — per the G2 display-design workflow recommendation.
 export const RENDER = {
@@ -26,7 +27,7 @@ export const RENDER = {
   debounceMs: 120,
   // Soft character budget per line (firmware font is fixed & proportional;
   // this is an approximation until pixel-accurate measurement is wired in).
-  maxCharsPerLine: 24,
+  maxCharsPerLine: 46,
 
   // --- Rolling-caption model (stt-even-g2: finalTranscript + provisionalSuffix) ---
   // The LIVE view (follow-newest) is a single flowing running caption: committed
