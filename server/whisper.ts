@@ -57,7 +57,7 @@ function looksLikeNoise(text: string): boolean {
  * `language: 'auto'` (default) lets whisper detect the spoken language;
  * pass a specific ISO-639-1 code to pin it.
  */
-export async function transcribe(pcm: Buffer, language?: string): Promise<Transcript | null> {
+export async function transcribe(pcm: Buffer, language?: string, signal?: AbortSignal): Promise<Transcript | null> {
   const wav = pcm16ToWav(pcm)
   const form = new FormData()
   form.append('file', new Blob([wav], { type: 'audio/wav' }), 'audio.wav')
@@ -65,7 +65,9 @@ export async function transcribe(pcm: Buffer, language?: string): Promise<Transc
   form.append('temperature', '0')
   form.append('language', language || process.env.WHISPER_LANGUAGE || 'auto')
 
-  const res = await fetch(`${WHISPER_URL}${INFERENCE_PATH}`, { method: 'POST', body: form })
+  // NB: abort frees the Node side; whisper.cpp may still finish computing the
+  // request. The real GPU guard is the pendingCommits single-flight in index.ts.
+  const res = await fetch(`${WHISPER_URL}${INFERENCE_PATH}`, { method: 'POST', body: form, signal })
   if (!res.ok) {
     throw new Error(`whisper-server ${res.status}: ${await res.text().catch(() => '')}`)
   }

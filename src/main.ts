@@ -74,8 +74,9 @@ if (created !== 0) {
 }
 
 // ---- Transcript body: bottom-anchored rolling buffer, translation-only ----
-const sentences: string[] = []
-let provisional = false // a phrase is being translated → show trailing "..."
+const sentences: string[] = [] // committed translations (Russian)
+let provisional = false // speech in progress → show the live source line
+let partialSource = '' // interim SOURCE text for the utterance being spoken
 let bodyPending = ' '
 let bodyLast = ''
 let bodyTimer: number | null = null
@@ -104,14 +105,42 @@ function toggleTranscript() {
   renderStatus()
 }
 
+// Keep the last `budget` chars of `s`; '...'-prefix if we cut into it. Firmware
+// wraps for us, so this is pure char-tailing (stt-even-g2's render model).
+function charTail(s: string, budget: number): string {
+  return s.length > budget ? RENDER.ellipsis + s.slice(s.length - budget) : s
+}
+
 function composeBody(): string {
   if (hidden) return ' '
-  const start = Math.max(0, maxOffset() - scrollOffset)
-  let text = sentences.slice(start, start + RENDER.maxLines).join('\n')
-  if (provisional && scrollOffset === 0) text = text ? `${text}\n...` : '...'
-  if (!text) return ' ' // blank until there's a translation
-  const cap = RENDER.maxLines * RENDER.maxCharsPerLine
-  return text.length > cap ? text.slice(text.length - cap) : text
+
+  // History view (ring-scrolled back): keep the working sentence-paged layout —
+  // one committed sentence per line, newest-block at the bottom. Untouched so the
+  // hard-won on-device behaviour doesn't regress.
+  if (scrollOffset > 0) {
+    const start = Math.max(0, maxOffset() - scrollOffset)
+    const text = sentences.slice(start, start + RENDER.maxLines).join('\n')
+    if (!text) return ' '
+    return charTail(text, RENDER.maxLines * RENDER.maxCharsPerLine)
+  }
+
+  // Live view (follow-newest): a single flowing "running caption".
+  //   line 1..n = committed Russian, whitespace-flattened & char-tailed
+  //   bottom    = the live interim SOURCE, marked "> ", while speech is ongoing.
+  // The source line is inherently distinct (foreign script) and the "> " marker
+  // reads as "currently hearing"; it is replaced by clean Russian within ~1s.
+  const committed = sentences.join(' ').replace(/\s+/g, ' ').trim()
+  const committedBudget = provisional ? RENDER.liveCharTailSpeaking : RENDER.liveCharTail
+  let out = charTail(committed, committedBudget)
+
+  if (provisional) {
+    const src = partialSource.replace(/\s+/g, ' ').trim()
+    const live = src ? charTail(src, RENDER.provChars) : RENDER.ellipsis
+    const marked = RENDER.provMarker + live
+    out = out ? `${out}\n${marked}` : marked
+  }
+
+  return out || ' ' // blank until the first translation (never regress to empty)
 }
 
 function renderBody() {
@@ -178,13 +207,25 @@ const link = new BackendLink({
         setStatus(msg.state, msg.message)
         break
       case 'partial':
-        setPartial(msg.source)
-        provisional = true
+      case 'interim': {
+        // Live running caption. An empty source clears it (server sends '' at
+        // finalize, including when the final result is filtered/unrenderable).
+        const live = msg.source
+        setPartial(live)
+        if (live) {
+          partialSource = live
+          provisional = true
+        } else {
+          partialSource = ''
+          provisional = false
+        }
         renderBody()
         break
+      }
       case 'segment':
         sentences.push(msg.target)
         provisional = false
+        partialSource = '' // committed → drop the live line
         lastLatency = msg.latencyMs
         lastSrcCode = whisperToCode(msg.sourceLang)
         if (scrollOffset > 0) scrollOffset = Math.min(scrollOffset + 1, maxOffset()) // keep view anchored

@@ -66,6 +66,10 @@ export type ServerMessage =
   | { type: 'status'; state: 'ready' | 'listening' | 'error'; message?: string }
   /** Interim source-language transcript for the utterance in progress. */
   | { type: 'partial'; source: string }
+  /** Rolling re-transcription of the utterance in progress. `source` = interim
+   *  STT of the last few seconds; an empty string clears the live line (used at
+   *  finalize, incl. when the final result is filtered out). */
+  | { type: 'interim'; source: string; sourceLang?: string }
   /** A finalized, translated line. `latencyMs` = server STT+translate time. */
   | { type: 'segment'; id: number; source: string; sourceLang: string; target: string; latencyMs: number }
   | { type: 'pong'; t: number }

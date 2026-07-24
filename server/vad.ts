@@ -104,6 +104,24 @@ export class VadSegmenter {
     return out
   }
 
+  /** True while an utterance is being accumulated. */
+  get speaking(): boolean {
+    return this.inSpeech
+  }
+
+  /**
+   * Read-only snapshot of the in-progress utterance for interim STT — only the
+   * last `maxWindowMs` of audio (a fixed trailing window, so per-interim cost is
+   * constant regardless of how long the utterance runs). Returns null unless
+   * mid-speech with >= minVoicedMs of real voice. Never mutates state.
+   */
+  snapshot(minVoicedMs = this.cfg.minVoicedMs, maxWindowMs = 4000): Buffer | null {
+    if (!this.inSpeech || this.voicedMs < minVoicedMs || this.buf.length === 0) return null
+    const all = Buffer.concat(this.buf) // fresh copy — safe against concurrent push()
+    const maxBytes = Math.floor(maxWindowMs * SAMPLES_PER_MS) * 2
+    return all.length > maxBytes ? all.subarray(all.length - maxBytes) : all
+  }
+
   private flush(): Buffer | null {
     const enoughSpeech = this.voicedMs >= this.cfg.minVoicedMs
     const seg = enoughSpeech ? Buffer.concat(this.buf) : null
