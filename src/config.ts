@@ -13,6 +13,12 @@ export function backendWsUrl(): string {
   return `${proto}//${location.host}/ws`
 }
 
+import type { WidthMode } from '../shared/protocol'
+
+// Manual wrap column per width setting (firmware wraps ~24 chars at full width;
+// smaller values force a narrower text column by inserting line breaks).
+export const WIDTH_CPL: Record<WidthMode, number> = { full: 24, medium: 18, narrow: 13 }
+
 // Glasses render tuning — per the G2 display-design workflow recommendation.
 export const RENDER = {
   // BLE render queue is slow — coalesce display writes. Kept short so the live

@@ -5,7 +5,7 @@ import {
   TextContainerUpgrade,
   OsEventTypeList,
 } from '@evenrealities/even_hub_sdk'
-import { CANVAS, RENDER } from './config'
+import { CANVAS, RENDER, WIDTH_CPL } from './config'
 import { DEFAULT_CONFIG, LANGUAGES, type ClientConfig } from '../shared/protocol'
 import { BackendLink } from './net'
 import { mountUi, setStatus, setPartial, addSegment, setMuted, syncConfig } from './ui'
@@ -111,36 +111,50 @@ function charTail(s: string, budget: number): string {
   return s.length > budget ? RENDER.ellipsis + s.slice(s.length - budget) : s
 }
 
+// Word-wrap into lines of <= cpl chars. Firmware also wraps, but manual wrapping
+// lets the width/line-count settings control the column without touching geometry.
+function wrap(text: string, cpl: number): string[] {
+  const out: string[] = []
+  let cur = ''
+  for (let word of text.split(/\s+/).filter(Boolean)) {
+    while (word.length > cpl) {
+      if (cur) { out.push(cur); cur = '' }
+      out.push(word.slice(0, cpl))
+      word = word.slice(cpl)
+    }
+    if (!cur) cur = word
+    else if (cur.length + 1 + word.length <= cpl) cur += ` ${word}`
+    else { out.push(cur); cur = word }
+  }
+  if (cur) out.push(cur)
+  return out
+}
+
 function composeBody(): string {
   if (hidden) return ' '
+  const cpl = WIDTH_CPL[config.width]
 
-  // History view (ring-scrolled back): keep the working sentence-paged layout —
-  // one committed sentence per line, newest-block at the bottom. Untouched so the
-  // hard-won on-device behaviour doesn't regress.
+  // History view (ring-scrolled back): sentence-paged, newest block at bottom.
   if (scrollOffset > 0) {
     const start = Math.max(0, maxOffset() - scrollOffset)
     const text = sentences.slice(start, start + RENDER.maxLines).join('\n')
-    if (!text) return ' '
-    return charTail(text, RENDER.maxLines * RENDER.maxCharsPerLine)
+    return text ? charTail(text, RENDER.maxLines * RENDER.maxCharsPerLine) : ' '
   }
 
-  // Live view (follow-newest): a single flowing "running caption".
-  //   line 1..n = committed Russian, whitespace-flattened & char-tailed
-  //   bottom    = the live interim SOURCE, marked "> ", while speech is ongoing.
-  // The source line is inherently distinct (foreign script) and the "> " marker
-  // reads as "currently hearing"; it is replaced by clean Russian within ~1s.
+  // Live view (follow-newest): committed Russian, wrapped to `width`, showing the
+  // last `lines` lines, newest at the bottom; plus the live source line "> …"
+  // while speech is ongoing (replaced by clean Russian within ~1s).
   const committed = sentences.join(' ').replace(/\s+/g, ' ').trim()
-  const committedBudget = provisional ? RENDER.liveCharTailSpeaking : RENDER.liveCharTail
-  let out = charTail(committed, committedBudget)
+  const wrapped = wrap(committed, cpl)
+  const reserve = provisional ? 1 : 0 // keep a row for the live line
+  const keep = Math.max(0, config.lines - reserve)
+  const lines = wrapped.slice(Math.max(0, wrapped.length - keep))
 
   if (provisional) {
     const src = partialSource.replace(/\s+/g, ' ').trim()
-    const live = src ? charTail(src, RENDER.provChars) : RENDER.ellipsis
-    const marked = RENDER.provMarker + live
-    out = out ? `${out}\n${marked}` : marked
+    lines.push(RENDER.provMarker + (src ? charTail(src, cpl) : RENDER.ellipsis))
   }
-
-  return out || ' ' // blank until the first translation (never regress to empty)
+  return lines.join('\n') || ' '
 }
 
 function renderBody() {
@@ -171,13 +185,15 @@ function renderStatus() {
   let content: string
   if (!link.isOpen) {
     content = 'OFFLINE'
+  } else if (config.status === 'off') {
+    content = ' ' // strip hidden — container stays (geometry unchanged), shows nothing
   } else {
     const src = (config.sourceLang !== 'auto' ? config.sourceLang : (lastSrcCode ?? 'auto')).toUpperCase()
     const tgt = config.targetLang.toUpperCase()
     content = `${src}>${tgt}  ${muted ? 'MUTE' : 'LIVE'}`
     if (hidden) content += '  HIDE'
     else if (scrollOffset > 0) content += '  HIST'
-    if (RENDER.showPersistentPing) {
+    if (config.status === 'ping') {
       content += `  net ${rtt ?? '-'}ms  tr ${lastLatency ?? '-'}ms`
     } else if (lastLatency != null && lastLatency > RENDER.lagThresholdMs) {
       content += `  LAG ${(lastLatency / 1000).toFixed(1)}s`

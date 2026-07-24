@@ -45,6 +45,10 @@ export function langEnName(code: string): string {
 
 /** Latency/quality presets — trade end-of-phrase wait + model for speed. */
 export type LatencyMode = 'fast' | 'balanced' | 'accurate'
+/** On-glass text width (manual wrap column; firmware wraps ~24 at full width). */
+export type WidthMode = 'full' | 'medium' | 'narrow'
+/** Top status strip mode. */
+export type StatusMode = 'normal' | 'off' | 'ping'
 
 export type ClientConfig = {
   /** whisper source language, or 'auto' to detect. */
@@ -53,9 +57,25 @@ export type ClientConfig = {
   targetLang: string
   /** latency/quality tradeoff. */
   latency: LatencyMode
+  /** live streaming (rolling re-transcription) on/off (backend-relevant). */
+  interim: boolean
+  /** number of visible translation lines on glass (display-only). */
+  lines: 2 | 3 | 4
+  /** text width / wrap column (display-only). */
+  width: WidthMode
+  /** top status strip mode (display-only). */
+  status: StatusMode
 }
 
-export const DEFAULT_CONFIG: ClientConfig = { sourceLang: 'auto', targetLang: 'ru', latency: 'balanced' }
+export const DEFAULT_CONFIG: ClientConfig = {
+  sourceLang: 'auto',
+  targetLang: 'ru',
+  latency: 'balanced',
+  interim: true,
+  lines: 3,
+  width: 'full',
+  status: 'normal',
+}
 
 export type ClientMessage =
   | ({ type: 'config' } & ClientConfig)

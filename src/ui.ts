@@ -1,7 +1,7 @@
 // Companion-app WebView UI: language + latency + mute controls, connection
 // status, and a live mirror of the glasses text.
 
-import { LANGUAGES, type ClientConfig, type LatencyMode } from '../shared/protocol'
+import { LANGUAGES, type ClientConfig, type LatencyMode, type StatusMode, type WidthMode } from '../shared/protocol'
 
 type StatusState = 'connecting' | 'ready' | 'listening' | 'error'
 
@@ -10,6 +10,8 @@ const LATENCY_LABELS: Record<LatencyMode, string> = {
   balanced: 'Баланс',
   accurate: 'Точно',
 }
+const WIDTH_LABELS: Record<WidthMode, string> = { full: 'Полная', medium: 'Средняя', narrow: 'Узкая' }
+const STATUS_LABELS: Record<StatusMode, string> = { normal: 'Обычно', off: 'Скрыть', ping: 'Пинг' }
 
 let statusEl: HTMLDivElement
 let partialEl: HTMLDivElement
@@ -17,6 +19,10 @@ let linesEl: HTMLDivElement
 let srcEl: HTMLSelectElement
 let tgtEl: HTMLSelectElement
 let latEl: HTMLSelectElement
+let nlinesEl: HTMLSelectElement
+let widthEl: HTMLSelectElement
+let streamEl: HTMLSelectElement
+let statusModeEl: HTMLSelectElement
 let muteEl: HTMLButtonElement
 
 const STYLE = `
@@ -73,6 +79,14 @@ export function mountUi(opts: {
   const latOptions = (Object.keys(LATENCY_LABELS) as LatencyMode[])
     .map(m => option(m, LATENCY_LABELS[m], m === opts.config.latency))
     .join('')
+  const linesOptions = ([2, 3, 4] as const).map(n => option(String(n), `${n} строки`, n === opts.config.lines)).join('')
+  const widthOptions = (Object.keys(WIDTH_LABELS) as WidthMode[])
+    .map(w => option(w, WIDTH_LABELS[w], w === opts.config.width))
+    .join('')
+  const streamOptions = option('on', 'Вкл', opts.config.interim) + option('off', 'Выкл', !opts.config.interim)
+  const statusOptions = (Object.keys(STATUS_LABELS) as StatusMode[])
+    .map(s => option(s, STATUS_LABELS[s], s === opts.config.status))
+    .join('')
 
   const app = document.getElementById('app')!
   app.innerHTML = `
@@ -87,6 +101,17 @@ export function mountUi(opts: {
         <div class="field"><label for="lat">Задержка</label><select id="lat">${latOptions}</select></div>
       </div>
     </details>
+    <details class="submenu">
+      <summary>⚙ Экран</summary>
+      <div class="row">
+        <div class="field"><label for="nlines">Строк</label><select id="nlines">${linesOptions}</select></div>
+        <div class="field"><label for="width">Ширина</label><select id="width">${widthOptions}</select></div>
+      </div>
+      <div class="row">
+        <div class="field"><label for="stream">Бегущая строка</label><select id="stream">${streamOptions}</select></div>
+        <div class="field"><label for="statusmode">Верх. строка</label><select id="statusmode">${statusOptions}</select></div>
+      </div>
+    </details>
     <div class="row"><button id="mute" type="button">🎙️ Слушаю</button></div>
     <div id="status" class="chip">Connecting…</div>
     <div id="partial"></div>
@@ -99,13 +124,25 @@ export function mountUi(opts: {
   srcEl = document.getElementById('src') as HTMLSelectElement
   tgtEl = document.getElementById('tgt') as HTMLSelectElement
   latEl = document.getElementById('lat') as HTMLSelectElement
+  nlinesEl = document.getElementById('nlines') as HTMLSelectElement
+  widthEl = document.getElementById('width') as HTMLSelectElement
+  streamEl = document.getElementById('stream') as HTMLSelectElement
+  statusModeEl = document.getElementById('statusmode') as HTMLSelectElement
   muteEl = document.getElementById('mute') as HTMLButtonElement
 
   const emit = () =>
-    opts.onConfig({ sourceLang: srcEl.value, targetLang: tgtEl.value, latency: latEl.value as LatencyMode })
-  srcEl.addEventListener('change', emit)
-  tgtEl.addEventListener('change', emit)
-  latEl.addEventListener('change', emit)
+    opts.onConfig({
+      sourceLang: srcEl.value,
+      targetLang: tgtEl.value,
+      latency: latEl.value as LatencyMode,
+      interim: streamEl.value === 'on',
+      lines: Number(nlinesEl.value) as 2 | 3 | 4,
+      width: widthEl.value as WidthMode,
+      status: statusModeEl.value as StatusMode,
+    })
+  for (const el of [srcEl, tgtEl, latEl, nlinesEl, widthEl, streamEl, statusModeEl]) {
+    el.addEventListener('change', emit)
+  }
   muteEl.addEventListener('click', () => opts.onToggleMute())
   setMuted(opts.muted)
 }
@@ -115,6 +152,10 @@ export function syncConfig(cfg: ClientConfig) {
   if (srcEl) srcEl.value = cfg.sourceLang
   if (tgtEl) tgtEl.value = cfg.targetLang
   if (latEl) latEl.value = cfg.latency
+  if (nlinesEl) nlinesEl.value = String(cfg.lines)
+  if (widthEl) widthEl.value = cfg.width
+  if (streamEl) streamEl.value = cfg.interim ? 'on' : 'off'
+  if (statusModeEl) statusModeEl.value = cfg.status
 }
 
 export function setMuted(muted: boolean) {
