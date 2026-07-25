@@ -81,6 +81,8 @@ export type ClientMessage =
   | ({ type: 'config' } & ClientConfig)
   /** RTT probe: server echoes it back as pong with the same `t`. */
   | { type: 'ping'; t: number }
+  /** Client-side log/error, surfaced in the backend's docker logs. */
+  | { type: 'clientlog'; level: string; message: string }
 
 export type ServerMessage =
   | { type: 'status'; state: 'ready' | 'listening' | 'error'; message?: string }
@@ -107,7 +109,7 @@ export function parseServerMessage(data: string): ServerMessage | null {
 export function parseClientMessage(data: string): ClientMessage | null {
   try {
     const msg = JSON.parse(data) as ClientMessage
-    return msg && (msg.type === 'config' || msg.type === 'ping') ? msg : null
+    return msg && (msg.type === 'config' || msg.type === 'ping' || msg.type === 'clientlog') ? msg : null
   } catch {
     return null
   }

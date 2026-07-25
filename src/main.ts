@@ -10,6 +10,33 @@ import { DEFAULT_CONFIG, LANGUAGES, type ClientConfig } from '../shared/protocol
 import { BackendLink } from './net'
 import { mountUi, setStatus, setPartial, addSegment, setMuted, syncConfig } from './ui'
 
+// ---- Crash/error observability ----
+// Pipe glasses-app JS errors to the backend (visible in `docker compose logs`
+// as `[client error] …`). Buffer until connected; remember the last crash
+// across an app reload so a startup crash still surfaces.
+const LASTERR_KEY = 'even-translate-lasterror'
+const logBuffer: { level: string; message: string }[] = []
+let logSink: ((l: { level: string; message: string }) => void) | null = null
+let persistErr: (m: string) => void = () => {}
+function report(level: 'error' | 'info', message: string) {
+  const entry = { level, message: `${message}`.slice(0, 800) }
+  if (logSink) logSink(entry)
+  else logBuffer.push(entry)
+  if (level === 'error') {
+    console.error(message)
+    persistErr(entry.message)
+  } else {
+    console.log(message)
+  }
+}
+window.addEventListener('error', e =>
+  report('error', `onerror: ${e.message} @ ${(e.filename || '?').split('/').pop()}:${e.lineno}`),
+)
+window.addEventListener('unhandledrejection', e => {
+  const r = (e as PromiseRejectionEvent).reason
+  report('error', `unhandledrejection: ${(r && (r.stack || r.message)) ?? r}`)
+})
+
 // ---- Persisted language/latency config ----
 // Use the SDK's durable storage (bridge.get/setLocalStorage) — the WebView's own
 // localStorage does NOT survive an app reload in the Even companion app.
@@ -34,6 +61,19 @@ async function loadConfig(): Promise<ClientConfig> {
   return { ...DEFAULT_CONFIG }
 }
 config = await loadConfig()
+
+// Now that the bridge exists, enable error persistence and surface any crash
+// from the previous launch.
+persistErr = m => void bridge.setLocalStorage(LASTERR_KEY, m).catch(() => {})
+try {
+  const last = await bridge.getLocalStorage(LASTERR_KEY)
+  if (last) {
+    report('error', `prev-launch crash: ${last}`)
+    void bridge.setLocalStorage(LASTERR_KEY, '').catch(() => {})
+  }
+} catch {
+  /* ignore */
+}
 
 // ---- Two containers (per the G2 display-design workflow) ----
 // Status strip: slim, non-capture, top. Transcript body: the capture container.
@@ -211,9 +251,12 @@ const link = new BackendLink({
   onOpen: () => {
     setStatus('ready')
     link.send({ type: 'config', ...config })
+    logSink = l => link.send({ type: 'clientlog', level: l.level, message: l.message })
+    for (const l of logBuffer.splice(0)) logSink(l) // flush buffered errors
     renderStatus()
   },
   onClose: () => {
+    logSink = null // buffer again until reconnected
     setStatus('connecting')
     renderStatus() // → OFFLINE
   },
@@ -312,26 +355,31 @@ function cleanup() {
 // ring rotate → scroll history. Long-press is the OS menu / app switcher (exit),
 // so the app is left via the system, not a bound gesture.
 const unsubscribe = bridge.onEvenHubEvent(event => {
-  const pcm = event.audioEvent?.audioPcm
-  if (pcm && !muted) link.sendPcm(pcm)
+  try {
+    const pcm = event.audioEvent?.audioPcm
+    if (pcm && !muted) link.sendPcm(pcm)
 
-  const sysType = event.sysEvent ? (event.sysEvent.eventType ?? OsEventTypeList.CLICK_EVENT) : null
-  const textType = event.textEvent?.eventType ?? null
+    const sysType = event.sysEvent ? (event.sysEvent.eventType ?? OsEventTypeList.CLICK_EVENT) : null
+    const textType = event.textEvent?.eventType ?? null
 
-  if (sysType === OsEventTypeList.DOUBLE_CLICK_EVENT || textType === OsEventTypeList.DOUBLE_CLICK_EVENT) {
-    toggleMute()
-    return
+    if (sysType === OsEventTypeList.DOUBLE_CLICK_EVENT || textType === OsEventTypeList.DOUBLE_CLICK_EVENT) {
+      toggleMute()
+      return
+    }
+    if (sysType === OsEventTypeList.SYSTEM_EXIT_EVENT || sysType === OsEventTypeList.ABNORMAL_EXIT_EVENT) {
+      cleanup()
+      return
+    }
+    if (sysType === OsEventTypeList.CLICK_EVENT) {
+      toggleTranscript()
+      return
+    }
+    if (textType === OsEventTypeList.SCROLL_TOP_EVENT) scrollBy(1)
+    else if (textType === OsEventTypeList.SCROLL_BOTTOM_EVENT) scrollBy(-1)
+  } catch (err) {
+    // A single bad event must never crash the app.
+    report('error', `event handler: ${(err as Error)?.stack ?? err}`)
   }
-  if (sysType === OsEventTypeList.SYSTEM_EXIT_EVENT || sysType === OsEventTypeList.ABNORMAL_EXIT_EVENT) {
-    cleanup()
-    return
-  }
-  if (sysType === OsEventTypeList.CLICK_EVENT) {
-    toggleTranscript()
-    return
-  }
-  if (textType === OsEventTypeList.SCROLL_TOP_EVENT) scrollBy(1)
-  else if (textType === OsEventTypeList.SCROLL_BOTTOM_EVENT) scrollBy(-1)
 })
 
 window.addEventListener('beforeunload', cleanup)
