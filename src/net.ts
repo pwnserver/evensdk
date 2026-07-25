@@ -4,7 +4,7 @@ import { backendWsUrl } from './config'
 type Handlers = {
   onMessage: (msg: ServerMessage) => void
   onOpen: () => void
-  onClose: () => void
+  onClose: (info: { code: number; reason: string }) => void
 }
 
 /**
@@ -40,8 +40,8 @@ export class BackendLink {
       const msg = parseServerMessage(ev.data)
       if (msg) this.handlers.onMessage(msg)
     }
-    ws.onclose = () => {
-      this.handlers.onClose()
+    ws.onclose = ev => {
+      this.handlers.onClose({ code: ev.code, reason: ev.reason })
       this.scheduleReconnect()
     }
     ws.onerror = () => {

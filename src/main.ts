@@ -64,12 +64,22 @@ config = await loadConfig()
 
 // Now that the bridge exists, enable error persistence and surface any crash
 // from the previous launch.
+const LASTCLOSE_KEY = 'even-translate-lastclose'
 persistErr = m => void bridge.setLocalStorage(LASTERR_KEY, m).catch(() => {})
+// A fresh "app loaded" on every page load: if this appears before EVERY
+// `client connected` in the server log, the app is reloading (crash/reload);
+// if only the first, the rest are plain WS reconnects on a live page.
+report('info', 'app loaded (0.2.5)')
 try {
   const last = await bridge.getLocalStorage(LASTERR_KEY)
   if (last) {
     report('error', `prev-launch crash: ${last}`)
     void bridge.setLocalStorage(LASTERR_KEY, '').catch(() => {})
+  }
+  const lastClose = await bridge.getLocalStorage(LASTCLOSE_KEY)
+  if (lastClose) {
+    report('info', `prev ws close: ${lastClose}`)
+    void bridge.setLocalStorage(LASTCLOSE_KEY, '').catch(() => {})
   }
 } catch {
   /* ignore */
@@ -255,7 +265,10 @@ const link = new BackendLink({
     for (const l of logBuffer.splice(0)) logSink(l) // flush buffered errors
     renderStatus()
   },
-  onClose: () => {
+  onClose: info => {
+    const detail = `code=${info.code}${info.reason ? ` ${info.reason}` : ''}`
+    report('info', `ws closed ${detail}`)
+    void bridge.setLocalStorage(LASTCLOSE_KEY, detail).catch(() => {}) // survive a reload
     logSink = null // buffer again until reconnected
     setStatus('connecting')
     renderStatus() // → OFFLINE
@@ -361,6 +374,11 @@ const unsubscribe = bridge.onEvenHubEvent(event => {
 
     const sysType = event.sysEvent ? (event.sysEvent.eventType ?? OsEventTypeList.CLICK_EVENT) : null
     const textType = event.textEvent?.eventType ?? null
+
+    // Lifecycle: log foreground transitions (a background/display-sleep drops the
+    // WS and looks like a "crash" — this tells us if that's what's happening).
+    if (sysType === OsEventTypeList.FOREGROUND_ENTER_EVENT) return report('info', 'foreground ENTER')
+    if (sysType === OsEventTypeList.FOREGROUND_EXIT_EVENT) return report('info', 'foreground EXIT')
 
     if (sysType === OsEventTypeList.DOUBLE_CLICK_EVENT || textType === OsEventTypeList.DOUBLE_CLICK_EVENT) {
       toggleMute()
